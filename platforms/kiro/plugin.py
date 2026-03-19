@@ -68,22 +68,79 @@ class KiroPlatform(BasePlatform):
 
     def check_valid(self, account: Account) -> bool:
         """通过 refreshToken 检测账号是否有效"""
-        refresh_token = account.extra.get("refreshToken", "")
+        extra = account.extra or {}
+        refresh_token = extra.get("refreshToken", "")
         if not refresh_token:
             return False
         try:
-            from curl_cffi import requests as curl_requests
-            r = curl_requests.post(
-                "https://oidc.us-east-1.amazonaws.com/token",
-                json={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                    "client_id": account.extra.get("clientId", ""),
-                    "client_secret": account.extra.get("clientSecret", ""),
-                },
-                impersonate="chrome131",
-                timeout=15,
+            from platforms.kiro.switch import refresh_kiro_token
+            ok, _ = refresh_kiro_token(
+                refresh_token,
+                extra.get("clientId", ""),
+                extra.get("clientSecret", ""),
             )
-            return r.status_code == 200
+            return ok
         except Exception:
             return False
+
+    def get_platform_actions(self) -> list:
+        return [
+            {"id": "switch_account", "label": "切换到桌面应用", "params": []},
+            {"id": "refresh_token", "label": "刷新 Token", "params": []},
+        ]
+
+    def execute_action(self, action_id: str, account: Account, params: dict) -> dict:
+        extra = account.extra or {}
+
+        if action_id == "switch_account":
+            from platforms.kiro.switch import (
+                refresh_kiro_token, switch_kiro_account, restart_kiro_ide,
+            )
+
+            access_token = extra.get("accessToken", "") or account.token
+            refresh_token = extra.get("refreshToken", "")
+            client_id = extra.get("clientId", "")
+            client_secret = extra.get("clientSecret", "")
+
+            if refresh_token and client_id and client_secret:
+                ok, result = refresh_kiro_token(refresh_token, client_id, client_secret)
+                if ok:
+                    access_token = result["accessToken"]
+                    refresh_token = result.get("refreshToken", refresh_token)
+
+            ok, msg = switch_kiro_account(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+            if not ok:
+                return {"ok": False, "error": msg}
+
+            restart_ok, restart_msg = restart_kiro_ide()
+            return {"ok": True, "data": {
+                "message": f"{msg}。{restart_msg}" if restart_ok else msg,
+            }}
+
+        elif action_id == "refresh_token":
+            from platforms.kiro.switch import refresh_kiro_token
+
+            refresh_token = extra.get("refreshToken", "")
+            client_id = extra.get("clientId", "")
+            client_secret = extra.get("clientSecret", "")
+
+            ok, result = refresh_kiro_token(refresh_token, client_id, client_secret)
+            if ok:
+                new_access = result["accessToken"]
+                new_refresh = result.get("refreshToken", refresh_token)
+                return {
+                    "ok": True,
+                    "data": {
+                        "access_token": new_access,
+                        "accessToken": new_access,
+                        "refreshToken": new_refresh,
+                    },
+                }
+            return {"ok": False, "error": result.get("error", "刷新失败")}
+
+        raise NotImplementedError(f"未知操作: {action_id}")

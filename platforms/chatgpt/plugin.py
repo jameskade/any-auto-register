@@ -135,6 +135,7 @@ class ChatGPTPlatform(BasePlatform):
         a.email = account.email
         a.access_token = extra.get("access_token") or account.token
         a.refresh_token = extra.get("refresh_token", "")
+        a.id_token = extra.get("id_token", "")
         a.session_token = extra.get("session_token", "")
         a.client_id = extra.get("client_id", "app_EMoamEEZ73f0CkXaXp7hrann")
         a.cookies = extra.get("cookies", "")

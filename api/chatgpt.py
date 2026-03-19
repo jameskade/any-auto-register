@@ -38,6 +38,7 @@ def _to_codex_account(acc: AccountModel):
     a.email = acc.email
     a.access_token = extra.get("access_token") or acc.token
     a.refresh_token = extra.get("refresh_token", "")
+    a.id_token = extra.get("id_token", "")
     a.session_token = extra.get("session_token", "")
     a.client_id = extra.get("client_id", "app_EMoamEEZ73f0CkXaXp7hrann")
     a.cookies = extra.get("cookies", "")
@@ -129,6 +130,7 @@ def upload_cpa(account_id: int, req: CpaUploadReq,
     acc = _get_account(account_id, session)
     codex_acc = _to_codex_account(acc)
 
-    from platforms.chatgpt.cpa_upload import upload_to_cpa
-    ok, msg = upload_to_cpa(codex_acc, api_url=req.api_url, api_key=req.api_key)
+    from platforms.chatgpt.cpa_upload import upload_to_cpa, generate_token_json
+    token_data = generate_token_json(codex_acc)
+    ok, msg = upload_to_cpa(token_data, api_url=req.api_url, api_key=req.api_key)
     return {"ok": ok, "message": msg}

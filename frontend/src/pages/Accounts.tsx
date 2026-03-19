@@ -195,22 +195,39 @@ function ActionMenu({ acc, onDetail, onDelete }: { acc: any; onDetail: () => voi
   const [open, setOpen] = useState(false)
   const [actions, setActions] = useState<any[]>([])
   const [running, setRunning] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     apiFetch(`/actions/${acc.platform}`).then(d => setActions(d.actions || [])).catch(() => {})
   }, [acc.platform])
+  useEffect(() => {
+    if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t) }
+  }, [toast])
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
 
   return (
     <div className="relative flex items-center gap-2">
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-top-2 ${
+          toast.type === 'success' ? 'bg-emerald-500/90 text-white' : 'bg-red-500/90 text-white'
+        }`} onClick={() => setToast(null)}>
+          {toast.type === 'success' ? '✓ ' : '✗ '}{toast.text}
+        </div>
+      )}
       <button onClick={onDetail} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">详情</button>
       <button onClick={() => { if (confirm(`确认删除 ${acc.email}？`)) apiFetch(`/accounts/${acc.id}`, { method: 'DELETE' }).then(onDelete) }}
         className="text-xs text-red-400 hover:text-red-300">删除</button>
       {actions.length > 0 && (
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button onClick={() => setOpen(o => !o)}
             className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">更多 ▾</button>
           {open && (
-            <div className="absolute right-0 top-5 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-lg z-20 min-w-[120px] py-1"
-                 onMouseLeave={() => setOpen(false)}>
+            <div className="absolute right-0 top-5 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-lg z-20 min-w-[120px] py-1">
               {actions.map(a => (
                 <button key={a.id}
                   onClick={() => {
@@ -219,19 +236,20 @@ function ActionMenu({ acc, onDetail, onDelete }: { acc: any; onDetail: () => voi
                     apiFetch(`/actions/${acc.platform}/${acc.id}/${a.id}`, { method: 'POST', body: JSON.stringify({ params: {} }) })
                       .then(r => {
                         setRunning(null)
-                        if (!r.ok) {
-                          const fallback = typeof r.data === 'string'
-                            ? r.data
-                            : (r.data?.message || r.message || '操作失败')
-                          alert(r.error || fallback)
-                          return
+                        const data = r || {}
+                        const targetUrl = data.url || data.checkout_url || data.cashier_url
+                        if (targetUrl) {
+                          window.open(targetUrl, '_blank')
+                          setToast({ type: 'success', text: data.message || '已打开链接' })
+                        } else if (typeof data === 'string') {
+                          setToast({ type: 'success', text: data })
+                        } else {
+                          setToast({ type: 'success', text: data.message || '操作成功' })
                         }
-                        const data = r.data || {}
-                        if (data.url || data.checkout_url) { window.open(data.url || data.checkout_url, '_blank') }
-                        else if (typeof data === 'string') { alert(data) }
-                        else if (data.message) { alert(data.message) }
-                        else { alert(JSON.stringify(data)) }
-                      }).catch(() => setRunning(null))
+                      }).catch((err: unknown) => {
+                        setRunning(null)
+                        setToast({ type: 'error', text: err instanceof Error ? err.message : '请求失败' })
+                      })
                   }}
                   disabled={!!running}
                   className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50">
@@ -250,7 +268,9 @@ function ActionMenu({ acc, onDetail, onDelete }: { acc: any; onDetail: () => voi
 function DetailModal({ acc, onClose, onSave }: { acc: any; onClose: () => void; onSave: () => void }) {
   const [form, setForm] = useState({ status: acc.status, token: acc.token || '', cashier_url: acc.cashier_url || '' })
   const [saving, setSaving] = useState(false)
-
+  const extra: Record<string, string> = (() => { try { return typeof acc.extra_json === 'string' ? JSON.parse(acc.extra_json) : (acc.extra_json || {}) } catch { return {} } })()
+  const copyText = (text: string) => navigator.clipboard.writeText(text)
+  const extraTokenKeys = ['accessToken', 'refreshToken', 'sessionToken', 'clientId', 'clientSecret'].filter(k => extra[k])
 
   const save = async () => {
     setSaving(true)
@@ -262,7 +282,7 @@ function DetailModal({ acc, onClose, onSave }: { acc: any; onClose: () => void; 
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl w-full max-w-lg shadow-2xl overflow-y-auto" style={{maxHeight:'90vh'}} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
           <div>
             <h2 className="text-base font-semibold text-[var(--text-primary)]">账号详情</h2>
@@ -278,6 +298,20 @@ function DetailModal({ acc, onClose, onSave }: { acc: any; onClose: () => void; 
               {['registered','trial','subscribed','expired','invalid'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          {extraTokenKeys.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-xs text-[var(--text-muted)] block">Tokens</label>
+              {extraTokenKeys.map(k => (
+                <div key={k}>
+                  <div className="text-xs text-[var(--text-muted)] mb-0.5">{k}</div>
+                  <div className="flex items-start gap-1">
+                    <div className="flex-1 bg-[var(--bg-hover)] border border-[var(--border)] rounded-md px-2 py-1.5 text-xs font-mono text-[var(--text-secondary)] break-all select-all">{extra[k]}</div>
+                    <button onClick={() => copyText(extra[k])} className="mt-1 shrink-0 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"><Copy className="h-3 w-3" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div>
             <label className="text-xs text-[var(--text-muted)] block mb-1">Token</label>
             <textarea value={form.token} onChange={e => setForm(f => ({ ...f, token: e.target.value }))}

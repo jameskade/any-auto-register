@@ -5,21 +5,18 @@ CPA (Codex Protocol API) 上传功能
 """
 
 import json
+import base64
 import logging
-from typing import List, Dict, Any, Tuple, Optional
-from datetime import datetime
+from typing import Tuple
+from datetime import datetime, timezone, timedelta
 
 from curl_cffi import requests as cffi_requests
 from curl_cffi import CurlMime
 
-# from ..database.session import get_db  # removed: external dep
-# from ..database.models import Account  # removed: external dep
-# from ..config.settings import get_settings  # removed: external dep
-
 logger = logging.getLogger(__name__)
 
 
-def _format_dt(value: Any) -> str:
+def _format_dt(value) -> str:
     if not value:
         return ""
     if isinstance(value, datetime):
@@ -27,33 +24,85 @@ def _format_dt(value: Any) -> str:
     return str(value)
 
 
-def generate_token_json(account: Account) -> dict:
-    """
-    生成 CPA 格式的 Token JSON
+def _decode_jwt_payload(token: str) -> dict:
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception:
+        return {}
 
-    Args:
-        account: 账号模型实例
 
-    Returns:
-        CPA 格式的 Token 字典
+def _get_config_value(key: str) -> str:
+    try:
+        from core.config_store import config_store
+        return config_store.get(key, "")
+    except Exception:
+        return ""
+
+
+def generate_token_json(account) -> dict:
     """
-    # 这里兼容插件层构造的 duck-typed 账号对象，避免字段缺失时直接崩溃。
+    生成 CPA 格式的 Token JSON。
+    接受任意 duck-typed 对象（需有 email, access_token, refresh_token 属性），
+    expired / account_id 从 JWT 自动解码，与 chatgpt_register 逻辑一致。
+    """
+    email = getattr(account, "email", "")
+    access_token = getattr(account, "access_token", "")
+    refresh_token = getattr(account, "refresh_token", "")
+    id_token = getattr(account, "id_token", "")
+
+    expired_str = ""
+    account_id = ""
+    if access_token:
+        payload = _decode_jwt_payload(access_token)
+        auth_info = payload.get("https://api.openai.com/auth", {})
+        account_id = auth_info.get("chatgpt_account_id", "")
+        exp_timestamp = payload.get("exp")
+        if isinstance(exp_timestamp, int) and exp_timestamp > 0:
+            exp_dt = datetime.fromtimestamp(
+                exp_timestamp, tz=timezone(timedelta(hours=8)))
+            expired_str = exp_dt.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+
+    if not expired_str:
+        expired_str = _format_dt(getattr(account, "expires_at", None))
+
+    account_id = account_id or getattr(account, "account_id", None) or getattr(account, "user_id", "") or ""
+    last_refresh = _format_dt(getattr(account, "last_refresh", None))
+    if not last_refresh:
+        now = datetime.now(tz=timezone(timedelta(hours=8)))
+        last_refresh = now.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+
     return {
         "type": "codex",
-        "email": getattr(account, "email", ""),
-        "expired": _format_dt(getattr(account, "expires_at", None)),
-        "id_token": getattr(account, "id_token", "") or "",
-        "account_id": getattr(account, "account_id", None) or getattr(account, "user_id", "") or "",
-        "access_token": getattr(account, "access_token", "") or "",
-        "last_refresh": _format_dt(getattr(account, "last_refresh", None)),
-        "refresh_token": getattr(account, "refresh_token", "") or "",
+        "email": email,
+        "expired": expired_str,
+        "id_token": id_token,
+        "account_id": account_id,
+        "access_token": access_token,
+        "last_refresh": last_refresh,
+        "refresh_token": refresh_token,
     }
 
 
-def upload_to_cpa(token_data: dict, api_url: str = None, api_key: str = None, proxy: str = None) -> Tuple[bool, str]:
-    """
-    上传单个账号到 CPA 管理平台（不走代理）
-    """
+def upload_to_cpa(
+    token_data: dict,
+    api_url: str = None,
+    api_key: str = None,
+    proxy: str = None,
+) -> Tuple[bool, str]:
+    """上传单个账号到 CPA 管理平台（不走代理）。
+    api_url / api_key 为空时自动从 ConfigStore 读取。"""
+    if not api_url:
+        api_url = _get_config_value("cpa_api_url")
+    if not api_key:
+        api_key = _get_config_value("cpa_api_key")
     if not api_url:
         return False, "CPA API URL 未配置"
 
@@ -66,6 +115,7 @@ def upload_to_cpa(token_data: dict, api_url: str = None, api_key: str = None, pr
         "Authorization": f"Bearer {api_key or ''}",
     }
 
+    mime = None
     try:
         mime = CurlMime()
         mime.addpart(
@@ -80,6 +130,7 @@ def upload_to_cpa(token_data: dict, api_url: str = None, api_key: str = None, pr
             multipart=mime,
             headers=headers,
             proxies=None,
+            verify=False,
             timeout=30,
             impersonate="chrome110",
         )
@@ -99,97 +150,75 @@ def upload_to_cpa(token_data: dict, api_url: str = None, api_key: str = None, pr
     except Exception as e:
         logger.error(f"CPA 上传异常: {e}")
         return False, f"上传异常: {str(e)}"
+    finally:
+        if mime:
+            mime.close()
 
 
-def batch_upload_to_cpa(account_ids: List[int], proxy: str = None) -> dict:
-    """
-    批量上传账号到 CPA 管理平台
+def upload_to_team_manager(
+    account,
+    api_url: str = None,
+    api_key: str = None,
+) -> Tuple[bool, str]:
+    """上传单账号到 Team Manager（直连，不走代理）。
+    api_url / api_key 为空时自动从 ConfigStore 读取。"""
+    if not api_url:
+        api_url = _get_config_value("team_manager_url")
+    if not api_key:
+        api_key = _get_config_value("team_manager_key")
+    if not api_url:
+        return False, "Team Manager API URL 未配置"
+    if not api_key:
+        return False, "Team Manager API Key 未配置"
 
-    Args:
-        account_ids: 账号 ID 列表
-        proxy: 可选的代理 URL
+    email = getattr(account, "email", "")
+    access_token = getattr(account, "access_token", "")
+    if not access_token:
+        return False, "账号缺少 access_token"
 
-    Returns:
-        包含成功/失败统计和详情的字典
-    """
-    results = {
-        "success_count": 0,
-        "failed_count": 0,
-        "skipped_count": 0,
-        "details": []
+    url = api_url.rstrip("/") + "/api/accounts/import"
+    headers = {
+        "X-API-Key": api_key,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "import_type": "single",
+        "email": email,
+        "access_token": access_token,
+        "session_token": getattr(account, "session_token", ""),
+        "refresh_token": getattr(account, "refresh_token", ""),
+        "client_id": getattr(account, "client_id", ""),
     }
 
-    with get_db() as db:
-        for account_id in account_ids:
-            account = db.query(Account).filter(Account.id == account_id).first()
-
-            if not account:
-                results["failed_count"] += 1
-                results["details"].append({
-                    "id": account_id,
-                    "email": None,
-                    "success": False,
-                    "error": "账号不存在"
-                })
-                continue
-
-            # 检查是否已有 Token
-            if not account.access_token:
-                results["skipped_count"] += 1
-                results["details"].append({
-                    "id": account_id,
-                    "email": account.email,
-                    "success": False,
-                    "error": "缺少 Token"
-                })
-                continue
-
-            # 生成 Token JSON
-            token_data = generate_token_json(account)
-
-            # 上传
-            success, message = upload_to_cpa(token_data, proxy)
-
-            if success:
-                # 更新数据库状态
-                account.cpa_uploaded = True
-                account.cpa_uploaded_at = datetime.utcnow()
-                db.commit()
-
-                results["success_count"] += 1
-                results["details"].append({
-                    "id": account_id,
-                    "email": account.email,
-                    "success": True,
-                    "message": message
-                })
-            else:
-                results["failed_count"] += 1
-                results["details"].append({
-                    "id": account_id,
-                    "email": account.email,
-                    "success": False,
-                    "error": message
-                })
-
-    return results
+    try:
+        resp = cffi_requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            proxies=None,
+            verify=False,
+            timeout=30,
+            impersonate="chrome110",
+        )
+        if resp.status_code in (200, 201):
+            return True, "上传成功"
+        error_msg = f"上传失败: HTTP {resp.status_code}"
+        try:
+            detail = resp.json()
+            if isinstance(detail, dict):
+                error_msg = detail.get("message", error_msg)
+        except Exception:
+            error_msg = f"{error_msg} - {resp.text[:200]}"
+        return False, error_msg
+    except Exception as e:
+        logger.error(f"Team Manager 上传异常: {e}")
+        return False, f"上传异常: {str(e)}"
 
 
 def test_cpa_connection(api_url: str, api_token: str, proxy: str = None) -> Tuple[bool, str]:
-    """
-    测试 CPA 连接（不走代理）
-
-    Args:
-        api_url: CPA API URL
-        api_token: CPA API Token
-        proxy: 保留参数，不使用（CPA 始终直连）
-
-    Returns:
-        (成功标志, 消息)
-    """
+    """测试 CPA 连接（不走代理）"""
     if not api_url:
         return False, "API URL 不能为空"
-
     if not api_token:
         return False, "API Token 不能为空"
 
@@ -202,6 +231,7 @@ def test_cpa_connection(api_url: str, api_token: str, proxy: str = None) -> Tupl
             test_url,
             headers=headers,
             proxies=None,
+            verify=False,
             timeout=10,
             impersonate="chrome110",
         )
