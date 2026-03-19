@@ -135,6 +135,7 @@ class RegistrationEngine:
         self.logs: list = []
         self._otp_sent_at: Optional[float] = None  # OTP 发送时间戳
         self._is_existing_account: bool = False  # 是否为已注册账号（用于自动登录）
+        self._last_error_message: str = ""
 
     def _log(self, message: str, level: str = "info"):
         """记录日志"""
@@ -182,16 +183,22 @@ class RegistrationEngine:
             self._log(f"正在创建 {self.email_service.service_type.value} 邮箱...")
             self.email_info = self.email_service.create_email()
 
-            if not self.email_info or "email" not in self.email_info:
-                self._log("创建邮箱失败: 返回信息不完整", "error")
+            email = ""
+            if self.email_info:
+                email = str(self.email_info.get("email", "")).strip()
+
+            if not self.email_info or not email:
+                self._last_error_message = "邮箱服务未返回有效邮箱地址，请检查当前邮箱配置"
+                self._log(f"创建邮箱失败: {self._last_error_message}", "error")
                 return False
 
-            self.email = self.email_info["email"]
+            self.email = email
             self._log(f"成功创建邮箱: {self.email}")
             return True
 
         except Exception as e:
-            self._log(f"创建邮箱失败: {e}", "error")
+            self._last_error_message = str(e)
+            self._log(f"创建邮箱失败: {self._last_error_message}", "error")
             return False
 
     def _start_oauth(self) -> bool:
@@ -267,6 +274,12 @@ class RegistrationEngine:
             SignupFormResult: 提交结果，包含账号状态判断
         """
         try:
+            if not self.email:
+                return SignupFormResult(
+                    success=False,
+                    error_message="当前邮箱为空，请先检查邮箱服务配置"
+                )
+
             signup_body = f'{{"username":{{"value":"{self.email}","kind":"email"}},"screen_hint":"signup"}}'
 
             headers = {
@@ -665,7 +678,7 @@ class RegistrationEngine:
             # 2. 创建邮箱
             self._log("2. 创建邮箱...")
             if not self._create_email():
-                result.error_message = "创建邮箱失败"
+                result.error_message = self._last_error_message or "创建邮箱失败"
                 return result
 
             result.email = self.email

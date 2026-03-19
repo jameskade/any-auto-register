@@ -79,6 +79,17 @@ class LaoудоMailbox(BaseMailbox):
         self._ua = "Mozilla/5.0"
 
     def get_email(self) -> MailboxAccount:
+        missing = []
+        if not self._email:
+            missing.append("laoudo_email")
+        if not self._account_id:
+            missing.append("laoudo_account_id")
+        if not self.auth:
+            missing.append("laoudo_auth")
+        if missing:
+            raise ValueError(
+                "Laoudo 配置不完整，缺少: " + ", ".join(missing)
+            )
         return MailboxAccount(email=self._email, account_id=self._account_id)
 
     def get_current_ids(self, account: MailboxAccount) -> set:
