@@ -403,7 +403,18 @@ export default function Accounts() {
     URL.revokeObjectURL(url)
   }
 
-  const copy = (text: string) => navigator.clipboard.writeText(text)
+  const copy = (text: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text)
+    } else {
+      const el = document.createElement('textarea')
+      el.value = text
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+  }
   const pageIds = accounts.map(acc => acc.id).filter(Boolean)
   const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id))
 

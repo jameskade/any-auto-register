@@ -368,10 +368,12 @@ class CFWorkerMailbox(BaseMailbox):
         r = requests.post(f"{self.api}/admin/new_address",
             json=payload, headers=self._headers(),
             proxies=self.proxy, timeout=15)
+        print(f"[CFWorker] new_address status={r.status_code} resp={r.text[:200]}")
         data = r.json()
         email = data.get("email", data.get("address", ""))
         token = data.get("token", data.get("jwt", ""))
         self._token = token
+        print(f"[CFWorker] 生成邮箱: {email} token={token[:40] if token else 'NONE'}...")
         return MailboxAccount(email=email, account_id=token)
 
     def _get_mails(self, email: str) -> list:
@@ -402,8 +404,19 @@ class CFWorkerMailbox(BaseMailbox):
                     if not mid or mid in seen:
                         continue
                     seen.add(mid)
-                    text = str(mail.get("subject", "")) + " " + str(mail.get("raw", ""))
-                    m = re.search(r'(?<!#)(?<!\d)(\d{6})(?!\d)', re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '', text))
+                    raw = str(mail.get("raw", ""))
+                    # 1. 优先匹配 <span>XXXXXX</span> （Trae 邮件格式）
+                    code_m = re.search(r'<span[^>]*>\s*(\d{6})\s*</span>', raw)
+                    if code_m:
+                        return code_m.group(1)
+                    # 2. 跳过 MIME header，只搜 body 部分，避免匹配时间戳
+                    body_start = raw.find('\r\n\r\n')
+                    search_text = raw[body_start:] if body_start != -1 else raw
+                    search_text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '', search_text)
+                    # 排除时间戳模式 m=+XXXXXX. 和 t=XXXXXXXXXX
+                    search_text = re.sub(r'm=\+\d+\.\d+', '', search_text)
+                    search_text = re.sub(r'\bt=\d+\b', '', search_text)
+                    m = re.search(r'(?<!#)(?<!\d)(\d{6})(?!\d)', search_text)
                     if m:
                         return m.group(1)
             except Exception:

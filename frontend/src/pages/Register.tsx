@@ -14,9 +14,14 @@ export default function Register() {
     proxy: '',
     executor_type: 'protocol',
     captcha_solver: 'yescaptcha',
+    mail_provider: 'moemail',
     laoudo_auth: '',
     laoudo_email: '',
     laoudo_account_id: '',
+    cfworker_api_url: '',
+    cfworker_admin_token: '',
+    cfworker_domain: '',
+    cfworker_fingerprint: '',
     yescaptcha_key: '',
     solver_url: 'http://localhost:8888',
   })
@@ -37,9 +42,14 @@ export default function Register() {
         executor_type: form.executor_type,
         captcha_solver: form.captcha_solver,
         extra: {
+          mail_provider: form.mail_provider,
           laoudo_auth: form.laoudo_auth,
           laoudo_email: form.laoudo_email,
           laoudo_account_id: form.laoudo_account_id,
+          cfworker_api_url: form.cfworker_api_url,
+          cfworker_admin_token: form.cfworker_admin_token,
+          cfworker_domain: form.cfworker_domain,
+          cfworker_fingerprint: form.cfworker_fingerprint,
           yescaptcha_key: form.yescaptcha_key,
             solver_url: form.solver_url,
         },
@@ -112,11 +122,20 @@ export default function Register() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>邮箱配置 (Laoudo)</CardTitle></CardHeader>
+        <CardHeader><CardTitle>邮箱配置</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <Input label="邮箱地址" k="laoudo_email" placeholder="xxx@laoudo.com" />
-          <Input label="Account ID" k="laoudo_account_id" placeholder="563" />
-          <Input label="JWT Token" k="laoudo_auth" placeholder="eyJ..." />
+          <Select label="邮箱服务" k="mail_provider" options={[['moemail','MoeMail (sall.cc)'],['laoudo','Laoudo'],['cfworker','CF Worker']]} />
+          {form.mail_provider === 'laoudo' && (<>
+            <Input label="邮箱地址" k="laoudo_email" placeholder="xxx@laoudo.com" />
+            <Input label="Account ID" k="laoudo_account_id" placeholder="563" />
+            <Input label="JWT Token" k="laoudo_auth" placeholder="eyJ..." />
+          </>)}
+          {form.mail_provider === 'cfworker' && (<>
+            <Input label="API URL" k="cfworker_api_url" placeholder="https://apimail.example.com" />
+            <Input label="Admin Token" k="cfworker_admin_token" placeholder="abc123,,,abc" />
+            <Input label="域名" k="cfworker_domain" placeholder="example.com" />
+            <Input label="Fingerprint (可选)" k="cfworker_fingerprint" placeholder="cfb82279f..." />
+          </>)}
         </CardContent>
       </Card>
 

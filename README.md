@@ -7,13 +7,13 @@
 ## 功能特性
 
 - **多平台支持**：Trae.ai、Tavily、Cursor、Kiro、ChatGPT、OpenBlockLabs，支持自定义插件扩展
-- **多邮箱服务**：Laoudo、TempMail.lol、DuckMail、Cloudflare Worker 自建邮箱
-- **多执行模式**：API 协议（无浏览器）、无头浏览器、有头浏览器（各平台按需支持）
+- **多邮箱服务**：MoeMail（自建）、Laoudo、DuckMail、Cloudflare Worker 自建邮箱
+- **多执行模式**：API 协议（无浏览器）、无头浏览器（待实现）、有头浏览器（待实现）（各平台按需支持）
 - **验证码服务**：YesCaptcha、2Captcha、本地 Solver（Camoufox）
 - **代理池管理**：自动轮询、成功率统计、自动禁用失效代理
 - **并发注册**：可配置并发数
 - **实时日志**：SSE 实时推送注册日志到前端
-- **平台扩展操作**：各平台可自定义操作（如 ChatGPT 支持 Token 刷新、支付链接生成、CPA 上传）
+- **平台扩展操作**：各平台可自定义操作（如 Kiro 账号切换、Trae Pro 升级链接生成）
 
 ## 技术栈
 
@@ -33,20 +33,49 @@
 
 ### 安装
 
+#### macOS / Linux
+
 ```bash
-# 后端依赖
+# 克隆项目
+git clone <repo_url>
+cd account_manager
+
+# 创建虚拟环境
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
+
+# 安装后端依赖
 pip install -r requirements.txt
 
-# 前端构建
+# 构建前端
 cd frontend
 npm install
 npm run build
 cd ..
 ```
 
-### 安装浏览器（可选，无头浏览器模式需要）
+#### Windows
+
+```bat
+:: 克隆项目
+git clone <repo_url>
+cd account_manager
+
+:: 创建虚拟环境
+python -m venv .venv
+.venv\Scripts\activate
+
+:: 安装后端依赖
+pip install -r requirements.txt
+
+:: 构建前端
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+### 安装浏览器（可选，无头/有头浏览器模式需要）
 
 ```bash
 # Playwright 浏览器
@@ -56,22 +85,73 @@ python3 -m playwright install chromium
 python3 -m camoufox fetch
 ```
 
-### 启动后端
+### 启动
+
+#### macOS / Linux
 
 ```bash
 .venv/bin/python3 -m uvicorn main:app --port 8000
 ```
 
-### 启动前端（开发模式）
+#### Windows
+
+```bat
+.venv\Scripts\python -m uvicorn main:app --port 8000
+```
+
+浏览器访问 `http://localhost:5173`
+
+### 开发模式（前端热更新）
 
 ```bash
 cd frontend
 npm run dev
+# 访问 http://localhost:5173
 ```
 
-前端开发服务器运行在 `http://localhost:5173`，已配置代理自动转发 `/api` 请求到后端 8000 端口。
+## 邮箱服务配置
 
-浏览器访问 `http://localhost:5173`
+注册时需要选择一种邮箱服务用于接收验证码。
+
+### MoeMail（推荐）
+
+基于开源项目 [cloudflare_temp_email](https://github.com/dreamhunter2333/cloudflare_temp_email) 自建的临时邮箱服务，无需配置任何参数，系统自动注册临时账号并生成邮箱。
+
+在注册页选择 **MoeMail**，填写你部署的实例地址（默认使用公共实例）。
+
+### Laoudo
+
+使用固定的自有域名邮箱，稳定性最高，适合长期使用。
+
+| 参数 | 说明 |
+|------|------|
+| 邮箱地址 | 完整邮箱地址，如 `user@example.com` |
+| Account ID | 邮箱账号 ID（在 Laoudo 面板查看）|
+| JWT Token | 登录后从浏览器 Cookie 或接口获取的认证 Token |
+
+### Cloudflare Worker 自建邮箱
+
+基于 [cloudflare_temp_email](https://github.com/dreamhunter2333/cloudflare_temp_email) 自行部署的邮箱服务，完全自主可控。
+
+**部署步骤**：参考项目文档，部署 Cloudflare Worker + D1 数据库 + Email Routing。
+
+| 参数 | 说明 |
+|------|------|
+| API URL | Worker 的后端 API 地址，如 `https://api.your-domain.com` |
+| Admin Token | 管理员密码，在 Worker 环境变量 `ADMIN_PASSWORDS` 中配置 |
+| 域名 | 收件邮箱的域名，如 `your-domain.com`（需配置 MX 记录指向 Cloudflare）|
+| Fingerprint | 可选，Worker 开启 fingerprint 验证时填写 |
+
+### DuckMail
+
+公共临时邮箱服务，无需配置，直接使用。部分地区需要代理。
+
+## 验证码服务配置
+
+| 服务 | 说明 |
+|------|------|
+| YesCaptcha | 需填写 Client Key，在 [yescaptcha.com](https://yescaptcha.com) 注册获取 |
+| 本地 Solver | 使用 Camoufox 本地解码，需先执行 `python3 -m camoufox fetch` |
 
 ## 项目结构
 
@@ -85,20 +165,18 @@ account_manager/
 │   ├── config.py           # 全局配置持久化
 │   └── proxies.py          # 代理管理
 ├── core/                   # 基础设施层
-│   ├── base_platform.py    # 平台基类（register/check_valid/get_platform_actions）
+│   ├── base_platform.py    # 平台基类
 │   ├── base_mailbox.py     # 邮箱服务基类 + 工厂方法
 │   ├── base_captcha.py     # 验证码服务基类
-│   ├── base_executor.py    # 执行器基类
-│   ├── http_client.py      # 通用 HTTP 客户端（curl_cffi）
 │   ├── db.py               # 数据模型
 │   ├── proxy_pool.py       # 代理池
 │   ├── registry.py         # 平台插件注册表
 │   └── scheduler.py        # 定时任务
 ├── platforms/              # 平台插件层
-│   ├── {platform}/
-│   │   ├── plugin.py       # 平台适配层（实现 BasePlatform）
-│   │   └── core.py         # 注册协议核心逻辑
-│   └── chatgpt/            # ChatGPT 额外包含 oauth/payment/token_refresh 等
+│   └── {platform}/
+│       ├── plugin.py       # 平台适配层
+│       ├── core.py         # 注册协议核心逻辑
+│       └── switch.py       # 账号切换逻辑
 ├── services/               # 后台服务
 │   ├── solver_manager.py   # Turnstile Solver 进程管理
 │   └── turnstile_solver/   # 本地 Camoufox Solver
@@ -121,24 +199,13 @@ class MyPlatform(BasePlatform):
     supported_executors = ["protocol"]
 
     def register(self, email: str, password: str = None) -> Account:
-        # 实现注册逻辑
         # 用 self.mailbox.get_email() 获取邮箱
         # 用 self.mailbox.wait_for_code() 收验证码
         ...
 
     def check_valid(self, account: Account) -> bool:
-        # 实现账号有效性检测
         ...
 ```
-
-## 邮箱服务
-
-| 服务 | 类型 | 说明 |
-|------|------|------|
-| Laoudo | 固定邮箱 | 自有域名邮箱，稳定性最高 |
-| TempMail.lol | 自动生成 | 免费临时邮箱，CN IP 需代理 |
-| DuckMail | 自动生成 | 自动创建随机账号 |
-| CF Worker | 自动生成 | 自建 Cloudflare Worker 邮箱 |
 
 ## License
 

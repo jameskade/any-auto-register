@@ -44,7 +44,7 @@ class TraeRegister:
         self.log("验证码已发送，等待邮件...")
 
     def step3_register(self, email: str, password: str, otp: str):
-        self.log("提交注册...")
+        self.log(f"提交注册... otp={otp}")
         r = self.ex.post(f"{BASE_URL}/passport/web/email/register_verify_login/",
                          params=_base_params(),
                          data={"type": "1", "email": email, "password": password,
@@ -77,8 +77,10 @@ class TraeRegister:
                              json={"product_ids": ["2"],
                                    "result_url": "https://www.trae.ai/account-setting"
                                                  "?type=upgrade&identity=1#subscription"})
+            self.log(f"  create_order status={r.status_code} resp={r.text[:200]}")
             return r.json().get("order_info", {}).get("cashier_url", "")
-        except Exception:
+        except Exception as e:
+            self.log(f"  create_order 失败: {e}")
             return ""
 
     def register(self, email: str, password: str = None,
