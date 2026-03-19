@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 CPA (Codex Protocol API) 上传功能
 """
@@ -17,6 +19,14 @@ from curl_cffi import CurlMime
 logger = logging.getLogger(__name__)
 
 
+def _format_dt(value: Any) -> str:
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+    return str(value)
+
+
 def generate_token_json(account: Account) -> dict:
     """
     生成 CPA 格式的 Token JSON
@@ -27,15 +37,16 @@ def generate_token_json(account: Account) -> dict:
     Returns:
         CPA 格式的 Token 字典
     """
+    # 这里兼容插件层构造的 duck-typed 账号对象，避免字段缺失时直接崩溃。
     return {
         "type": "codex",
-        "email": account.email,
-        "expired": account.expires_at.strftime("%Y-%m-%dT%H:%M:%S+08:00") if account.expires_at else "",
-        "id_token": account.id_token or "",
-        "account_id": account.account_id or "",
-        "access_token": account.access_token or "",
-        "last_refresh": account.last_refresh.strftime("%Y-%m-%dT%H:%M:%S+08:00") if account.last_refresh else "",
-        "refresh_token": account.refresh_token or "",
+        "email": getattr(account, "email", ""),
+        "expired": _format_dt(getattr(account, "expires_at", None)),
+        "id_token": getattr(account, "id_token", "") or "",
+        "account_id": getattr(account, "account_id", None) or getattr(account, "user_id", "") or "",
+        "access_token": getattr(account, "access_token", "") or "",
+        "last_refresh": _format_dt(getattr(account, "last_refresh", None)),
+        "refresh_token": getattr(account, "refresh_token", "") or "",
     }
 
 

@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session, select, func
 from core.db import AccountModel, get_session
 from typing import Optional
 import io, csv
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
+
+
+class BulkDeleteRequest(BaseModel):
+    account_ids: list[int]
 
 
 @router.get("")
@@ -57,6 +62,31 @@ def delete_account(account_id: int, session: Session = Depends(get_session)):
     session.delete(acc)
     session.commit()
     return {"ok": True}
+
+
+@router.post("/bulk-delete")
+def bulk_delete_accounts(body: BulkDeleteRequest, session: Session = Depends(get_session)):
+    if not body.account_ids:
+        raise HTTPException(400, "请选择至少一个账号")
+
+    ids = list(dict.fromkeys(body.account_ids))
+    accounts = session.exec(
+        select(AccountModel).where(AccountModel.id.in_(ids))
+    ).all()
+    if not accounts:
+        raise HTTPException(404, "未找到可删除的账号")
+
+    found_ids = {acc.id for acc in accounts if acc.id is not None}
+    for acc in accounts:
+        session.delete(acc)
+    session.commit()
+
+    missing_ids = [account_id for account_id in ids if account_id not in found_ids]
+    return {
+        "ok": True,
+        "deleted": len(accounts),
+        "missing_ids": missing_ids,
+    }
 
 
 @router.post("/{account_id}/check")

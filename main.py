@@ -48,6 +48,12 @@ def on_shutdown():
     stop()
 
 
+@app.get("/api/health")
+def health():
+    from services.solver_manager import is_running
+    return {"status": "ok", "solver_running": is_running()}
+
+
 @app.get("/api/solver/status")
 def solver_status():
     from services.solver_manager import is_running

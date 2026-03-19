@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 注册流程引擎
 从 main.py 中提取并重构的注册流程

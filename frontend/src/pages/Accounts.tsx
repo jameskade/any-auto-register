@@ -4,7 +4,7 @@ import { apiFetch, API_BASE } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { RefreshCw, Copy, ExternalLink, PlusCircle, Download, Upload, Plus, X } from 'lucide-react'
+import { RefreshCw, Copy, ExternalLink, PlusCircle, Download, Upload, Plus, X, Trash2 } from 'lucide-react'
 
 const STATUS_VARIANT: Record<string, any> = {
   registered: 'default', trial: 'success', subscribed: 'success',
@@ -219,9 +219,17 @@ function ActionMenu({ acc, onDetail, onDelete }: { acc: any; onDetail: () => voi
                     apiFetch(`/actions/${acc.platform}/${acc.id}/${a.id}`, { method: 'POST', body: JSON.stringify({ params: {} }) })
                       .then(r => {
                         setRunning(null)
-                        if (!r.ok) { alert(r.error); return }
+                        if (!r.ok) {
+                          const fallback = typeof r.data === 'string'
+                            ? r.data
+                            : (r.data?.message || r.message || '操作失败')
+                          alert(r.error || fallback)
+                          return
+                        }
                         const data = r.data || {}
                         if (data.url || data.checkout_url) { window.open(data.url || data.checkout_url, '_blank') }
+                        else if (typeof data === 'string') { alert(data) }
+                        else if (data.message) { alert(data.message) }
                         else { alert(JSON.stringify(data)) }
                       }).catch(() => setRunning(null))
                   }}
@@ -331,6 +339,9 @@ export default function Accounts() {
   const [showImport, setShowImport] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkUploadingCpa, setBulkUploadingCpa] = useState(false)
 
   const load = async (p = tab, s = search, fs = filterStatus) => {
     setLoading(true)
@@ -339,7 +350,10 @@ export default function Accounts() {
       if (s) params.set('email', s)
       if (fs) params.set('status', fs)
       const data = await apiFetch(`/accounts?${params}`)
-      setAccounts(data.items); setTotal(data.total)
+      const nextItems = data.items || []
+      const nextIds = new Set(nextItems.map((item: any) => item.id))
+      setAccounts(nextItems); setTotal(data.total)
+      setSelectedIds(prev => prev.filter(id => nextIds.has(id)))
     } finally { setLoading(false) }
   }
 
@@ -356,6 +370,62 @@ export default function Accounts() {
   }
 
   const copy = (text: string) => navigator.clipboard.writeText(text)
+  const pageIds = accounts.map(acc => acc.id).filter(Boolean)
+  const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id))
+
+  const toggleSelected = (accountId: number) => {
+    setSelectedIds(prev => prev.includes(accountId)
+      ? prev.filter(id => id !== accountId)
+      : [...prev, accountId])
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? [] : pageIds)
+  }
+
+  const deleteSelected = async () => {
+    if (selectedIds.length === 0) return
+    if (!confirm(`确认删除选中的 ${selectedIds.length} 个账号？`)) return
+
+    setBulkDeleting(true)
+    try {
+      const res = await apiFetch('/accounts/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ account_ids: selectedIds }),
+      })
+      setSelectedIds([])
+      await load()
+      const missing = res.missing_ids?.length ? `，${res.missing_ids.length} 个账号已不存在` : ''
+      alert(`已删除 ${res.deleted || 0} 个账号${missing}`)
+    } catch (e: any) {
+      alert(e.message || '批量删除失败')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
+  const uploadSelectedToCpa = async () => {
+    if (selectedIds.length === 0 || tab !== 'chatgpt') return
+    if (!confirm(`确认上传选中的 ${selectedIds.length} 个 ChatGPT 账号到 CPA？`)) return
+
+    setBulkUploadingCpa(true)
+    try {
+      const res = await apiFetch(`/actions/${tab}/bulk/upload_cpa/run`, {
+        method: 'POST',
+        body: JSON.stringify({ account_ids: selectedIds, params: {} }),
+      })
+      const details = Array.isArray(res.details) ? res.details : []
+      const failed = details.filter((item: any) => !item.success).slice(0, 3)
+      const failedText = failed.length > 0
+        ? `\n失败示例：${failed.map((item: any) => `${item.email || item.id}: ${item.error || '未知错误'}`).join('；')}`
+        : ''
+      alert(`CPA 上传完成：成功 ${res.success_count || 0} 个，失败 ${res.failed_count || 0} 个${failedText}`)
+    } catch (e: any) {
+      alert(e.message || '批量上传 CPA 失败')
+    } finally {
+      setBulkUploadingCpa(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -381,9 +451,25 @@ export default function Accounts() {
             <option value="invalid">已失效</option>
           </select>
           <span className="text-xs text-[var(--text-muted)]">{total} 个账号</span>
+          {selectedIds.length > 0 && (
+            <span className="text-xs text-[var(--text-accent)]">已选 {selectedIds.length} 个</span>
+          )}
         </div>
         {/* 右侧：操作按钮 */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {selectedIds.length > 0 && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setSelectedIds([])}>取消选择</Button>
+              {tab === 'chatgpt' && (
+                <Button variant="outline" size="sm" onClick={uploadSelectedToCpa} disabled={bulkUploadingCpa}>
+                  <Upload className="h-4 w-4 mr-1" />{bulkUploadingCpa ? '上传中...' : '批量上传CPA'}
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={deleteSelected} disabled={bulkDeleting} className="text-red-400 hover:text-red-300">
+                <Trash2 className="h-4 w-4 mr-1" />{bulkDeleting ? '删除中...' : '批量删除'}
+              </Button>
+            </>
+          )}
           <Button variant="outline" size="sm" onClick={() => setShowImport(true)}><Upload className="h-4 w-4 mr-1" />导入</Button>
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={accounts.length === 0}><Download className="h-4 w-4 mr-1" />导出</Button>
           <Button variant="outline" size="sm" onClick={() => setShowAdd(true)}><Plus className="h-4 w-4 mr-1" />新增</Button>
@@ -399,6 +485,15 @@ export default function Accounts() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--border)] text-[var(--text-muted)] text-xs">
+              <th className="px-4 py-3 text-left w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  aria-label="全选当前页账号"
+                  className="h-4 w-4 rounded border-[var(--border)] bg-transparent"
+                />
+              </th>
               <th className="px-4 py-3 text-left">邮箱</th>
               <th className="px-4 py-3 text-left">密码</th>
               <th className="px-4 py-3 text-left">状态</th>
@@ -410,11 +505,20 @@ export default function Accounts() {
           </thead>
           <tbody>
             {accounts.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">暂无账号</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">暂无账号</td></tr>
             )}
             {accounts.map(acc => (
               <tr key={acc.id} className="border-b border-[var(--border)]/50 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
                   onClick={() => setDetail(acc)}>
+                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(acc.id)}
+                    onChange={() => toggleSelected(acc.id)}
+                    aria-label={`选择账号 ${acc.email}`}
+                    className="h-4 w-4 rounded border-[var(--border)] bg-transparent"
+                  />
+                </td>
                 <td className="px-4 py-3 font-mono text-xs">
                   <div className="flex items-center gap-1">
                     {acc.email}

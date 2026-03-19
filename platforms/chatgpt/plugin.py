@@ -160,15 +160,23 @@ class ChatGPTPlatform(BasePlatform):
 
         elif action_id == "upload_cpa":
             from platforms.chatgpt.cpa_upload import upload_to_cpa, generate_token_json
+            from core.config_store import config_store
             token_data = generate_token_json(a)
-            ok, msg = upload_to_cpa(token_data, api_url=params.get("api_url"),
-                                    api_key=params.get("api_key"))
-            return {"ok": ok, "data": msg}
+            api_url = params.get("api_url") or config_store.get("cpa_api_url")
+            api_key = params.get("api_key") or config_store.get("cpa_api_key")
+            ok, msg = upload_to_cpa(token_data, api_url=api_url, api_key=api_key)
+            if ok:
+                return {"ok": True, "data": {"message": msg}}
+            return {"ok": False, "error": msg}
 
         elif action_id == "upload_tm":
             from platforms.chatgpt.cpa_upload import upload_to_team_manager
-            ok, msg = upload_to_team_manager(a, api_url=params.get("api_url"),
-                                             api_key=params.get("api_key"))
-            return {"ok": ok, "data": msg}
+            from core.config_store import config_store
+            api_url = params.get("api_url") or config_store.get("team_manager_url")
+            api_key = params.get("api_key") or config_store.get("team_manager_key")
+            ok, msg = upload_to_team_manager(a, api_url=api_url, api_key=api_key)
+            if ok:
+                return {"ok": True, "data": {"message": msg}}
+            return {"ok": False, "error": msg}
 
         raise NotImplementedError(f"未知操作: {action_id}")
